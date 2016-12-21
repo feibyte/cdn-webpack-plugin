@@ -1,0 +1,20 @@
+{
+  "name": "cdn-webpack-plugin",
+  "version": "0.1.0",
+  "description": "自动匹配可用 cdn 资源的 webpack 插件",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "webpack",
+    "plugin",
+    "cdn-webpack-plugin"
+  ],
+  "author": "fedeoo",
+  "license": "MIT",
+  "dependencies": {
+    "lodash": "^4.17.2",
+    "webpack": "^1.14.0"
+  }
+}
