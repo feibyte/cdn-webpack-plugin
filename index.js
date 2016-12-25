@@ -1,6 +1,7 @@
 const _ = require('lodash');
 const ExternalModule = require('webpack/lib/ExternalModule');
-const CDNAssests = require('./lib/cdn-assets');
+const CDNAssests = require('./cdn-assets');
+const semver = require('semver');
 
 function CDNWebpackPlugin (options) {
   console.log(options);
@@ -40,43 +41,49 @@ CDNWebpackPlugin.prototype.apply = function (compiler) {
     });
   };
 
-  // 是否存在匹配版本
-  const existsMatchVersion = (CDNInfo, specifyVersion) => {
+  const findCaretMatchVersion = (moduleName, specifyVersion) => {
+    const CDNInfo = CDNAssests[moduleName];
     if (typeof CDNInfo === 'object') {
       const versions = CDNInfo.versions;
       if (Array.isArray(versions)) {
-        return versions.indexOf(specifyVersion) !== -1;
-      } else if (typeof versions === 'object'){
-        return !!versions[specifyVersion];
+        return _.find(versions, (cdnVersion) => {
+          return semver.satisfies(cdnVersion, specifyVersion);
+        });
       }
     }
-    return false;
-  };
+    return undefined;
+  }
 
-  const hasVersionConflict = (moudleName, version) => {
-    const foundCDN = _.find(aviabaleCDNList, { moudleName: moudleName });
-    if (foundCDN && foundCDN.version !== version) {
-      return true;
+  // 若有依赖，先添加依赖
+  const addModuleToList = (moduleName, cdnVersion) => {
+    if (!_.find(aviabaleCDNList, { moduleName: moduleName })) {
+      if (CDNAssests[moduleName] && CDNAssests[moduleName].subVersionDependencies) {
+        _.mapKeys(CDNAssests[moduleName].subVersionDependencies[cdnVersion], (dependencyVersion, dependencyModuleName) => {
+          const aviableVersion = findCaretMatchVersion(dependencyModuleName, dependencyVersion);
+          if (typeof aviableVersion === 'undefined') {
+            throw new Error('cound not found ', dependencyModuleName, dependencyVersion);
+          }
+          addModuleToList(dependencyModuleName, aviableVersion);
+        });
+      }
+      aviabaleCDNList.push({
+        moduleName: moduleName,
+        version: cdnVersion
+      });
     }
-    return false;
   }
 
   compiler.options.externals = (context, request, callback) => {
     if (isModule(request) && request.indexOf('/') === -1) {
-      const moudleName = request;
-      resolveVersion(context, moudleName).then(version => {
-        const CDNInfo = CDNAssests[moudleName];
-        console.log(moudleName, version);
-        if (existsMatchVersion(CDNInfo, version)) { // 对应版本存在CDN可用资源
-          if (!hasVersionConflict(moudleName, version)) { // 与现有无冲突
-            aviabaleCDNList.push({
-              version: version,
-              moudleName: moudleName,
-              path: CDNInfo.path,
-            });
-            callback(undefined, new ExternalModule(CDNInfo.external, 'var'));
-            return ;
-          }
+      const moduleName = request;
+      console.log(context, moduleName);
+      resolveVersion(context, moduleName).then(version => {
+        const cdnVersion = findCaretMatchVersion(moduleName, '^' + version);
+        if (cdnVersion) { // 对应版本存在CDN可用资源
+          addModuleToList(moduleName, cdnVersion);
+          const CDNInfo = CDNAssests[moduleName];
+          callback(null, CDNInfo.external, 'var');
+          return ;
         }
         callback();
       }, () => {
@@ -92,7 +99,7 @@ CDNWebpackPlugin.prototype.apply = function (compiler) {
     compilation.plugin("html-webpack-plugin-before-html-processing", function(htmlPluginData, callback) {
       var bodyRegExp = /(<\/body>)/i;
       var externalScripts = _.uniq(aviabaleCDNList.map((item) => {
-        const scirptPath = item.path.replace('${version}', item.version);
+        const scirptPath = (CDNAssests[item.moduleName].path).replace('${version}', item.version);
         return `<script src="${scirptPath}"></script>\n`;
       }));
       htmlPluginData.html = htmlPluginData.html.replace(bodyRegExp, (match) => {
